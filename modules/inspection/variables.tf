@@ -60,6 +60,18 @@ variable "internet_facing_alb_arn" {
   default     = ""
 }
 
+variable "enable_https_listener" {
+  description = "Enable HTTPS listener for secure traffic"
+  type        = bool
+  default     = false
+}
+
+variable "ssl_certificate_arn" {
+  description = "ARN of the SSL certificate for HTTPS listener"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Common tags"
   type        = map(string)

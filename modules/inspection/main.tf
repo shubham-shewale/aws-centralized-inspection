@@ -65,9 +65,24 @@ resource "aws_lb_target_group" "gwlb" {
   tags = merge(var.tags, { Name = "inspection-tg" })
 }
 
-# Listener
+# Listener with SSL/TLS security - MEDIUM RISK FIX
 resource "aws_lb_listener" "gwlb" {
   load_balancer_arn = aws_lb.gwlb.arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.gwlb.arn
+  }
+}
+
+# HTTPS Listener for secure traffic (optional) - MEDIUM RISK FIX
+resource "aws_lb_listener" "https" {
+  count             = var.enable_https_listener ? 1 : 0
+  load_balancer_arn = aws_lb.gwlb.arn
+  port              = "443"
+  protocol          = "TLS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = var.ssl_certificate_arn
 
   default_action {
     type             = "forward"

@@ -124,7 +124,7 @@ variable "key_name" {
   default     = ""
 }
 
-# Security Rules for PAN-OS
+# Enhanced Security Rules for PAN-OS - LOW RISK IMPROVEMENT
 variable "security_rules" {
   description = "List of security rules for PAN-OS configuration"
   type = list(object({
@@ -136,8 +136,25 @@ variable "security_rules" {
     destination_addresses = list(string)
     applications        = list(string)
     services            = list(string)
+    description         = optional(string, "")
+    tags                = optional(list(string), [])
+    disabled            = optional(bool, false)
   }))
   default = []
+
+  validation {
+    condition = alltrue([
+      for rule in var.security_rules : contains(["allow", "deny", "drop"], rule.action)
+    ])
+    error_message = "Security rule action must be one of: allow, deny, drop."
+  }
+
+  validation {
+    condition = alltrue([
+      for rule in var.security_rules : length(rule.name) > 0 && length(rule.name) <= 63
+    ])
+    error_message = "Security rule name must be between 1 and 63 characters."
+  }
 }
 
 # Data Classification Tags - HIGH RISK FIX
@@ -151,18 +168,50 @@ variable "data_classification" {
   }
 }
 
-# Tags with Data Classification - HIGH RISK FIX
+# Enhanced Tags with Comprehensive Metadata - LOW RISK IMPROVEMENT
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
   default = {
+    # Core identification
     Environment        = "production"
     Project           = "centralized-inspection"
+    ManagedBy         = "terraform"
+    Module            = "aws-centralized-inspection"
+
+    # Security and compliance
     DataClassification = "sensitive"
     EncryptionAtRest  = "required"
+    EncryptionInTransit = "required"
     Backup            = "required"
+    DisasterRecovery = "required"
+
+    # Operational metadata
     Owner             = "security-team"
     CostCenter        = "security-operations"
-    Compliance        = "pci-dss,hipaa,soc2"
+    Department        = "information-security"
+    Team              = "network-security"
+
+    # Compliance frameworks
+    Compliance        = "pci-dss,hipaa,soc2,gdpr,nist-800-53"
+    SecurityLevel     = "high"
+    Confidentiality   = "restricted"
+    Integrity         = "high"
+    Availability      = "high"
+
+    # Change management
+    ChangeManagement = "required"
+    ApprovalRequired = "security-review"
+    MaintenanceWindow = "weekends-02:00-04:00-utc"
+
+    # Monitoring and alerting
+    Monitoring       = "enabled"
+    Alerting         = "critical-only"
+    LogRetention     = "365-days"
+
+    # Cost optimization
+    AutoShutdown     = "disabled"
+    ReservedInstance = "eligible"
+    SpotInstance     = "ineligible"
   }
 }

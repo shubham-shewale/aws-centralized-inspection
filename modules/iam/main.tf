@@ -112,16 +112,17 @@ resource "aws_iam_role_policy" "cross_account_least_privilege" {
 # Data source for account information
 data "aws_caller_identity" "current" {}
 
-# IAM Password Policy
+# Enhanced IAM Password Policy - LOW RISK IMPROVEMENT
 resource "aws_iam_account_password_policy" "strict" {
-  minimum_password_length        = 12
+  minimum_password_length        = 16
   require_uppercase_characters   = true
   require_lowercase_characters   = true
   require_numbers               = true
   require_symbols               = true
   allow_users_to_change_password = true
   max_password_age              = 90
-  password_reuse_prevention     = 5
+  password_reuse_prevention     = 10
+  hard_expiry                   = false
 }
 
 # CloudTrail for Audit Logging
