@@ -1,6 +1,6 @@
 # AWS Centralized Traffic Inspection - Deployment Guide
 
-This comprehensive deployment guide provides step-by-step instructions for deploying the AWS centralized traffic inspection architecture using Palo Alto firewalls.
+This comprehensive deployment guide provides step-by-step instructions for deploying the AWS centralized traffic inspection architecture using Palo Alto firewalls with enhanced security features including automated remediation and cross-account access controls.
 
 ## Table of Contents
 
@@ -58,7 +58,36 @@ Application Account(s) (Spoke VPCs)
         "cloudwatch:*",
         "kms:*",
         "autoscaling:*",
-        "ssm:*"
+        "ssm:*",
+        "lambda:*",
+        "events:*",
+        "sns:*"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**Enhanced Security Permissions:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:CreateKey",
+        "kms:DescribeKey",
+        "kms:CreateGrant",
+        "kms:Decrypt",
+        "kms:GenerateDataKey*",
+        "lambda:CreateFunction",
+        "lambda:InvokeFunction",
+        "events:PutRule",
+        "events:PutTargets",
+        "sns:CreateTopic",
+        "sns:Subscribe"
       ],
       "Resource": "*"
     }
@@ -307,24 +336,108 @@ mirror_filters = [
 ]
 ```
 
-### Step 5: Cost Optimization
+### Step 5: Security Configuration
 
-#### Development Environment
+#### Enhanced Security Settings
 ```hcl
-# Cost-optimized settings for dev
-vmseries_min_size = 1
-vmseries_max_size = 2
-enable_flow_logs = false
-enable_traffic_mirroring = false
+# Security-enhanced configuration
+enable_flow_logs         = true
+enable_traffic_mirroring = true
+enable_panos_config      = true
+
+# Data classification and compliance
+data_classification = "sensitive"
+tags = {
+  Compliance        = "pci-dss,hipaa,soc2,gdpr,nist-800-53"
+  SecurityLevel     = "high"
+  EncryptionAtRest  = "required"
+  Backup            = "required"
+}
+
+# Security rules validation
+security_rules = [
+  {
+    name                = "allow-web-traffic"
+    action              = "allow"
+    source_zones        = ["trust"]
+    destination_zones   = ["untrust"]
+    source_addresses    = ["10.1.0.0/16", "10.2.0.0/16"]
+    destination_addresses = ["0.0.0.0/0"]
+    applications        = ["web-browsing", "ssl"]
+    services            = ["service-http", "service-https"]
+  }
+]
 ```
 
-#### Production Environment
+#### Cost Optimization with Security
+
+##### Development Environment
 ```hcl
-# Production settings
+# Cost-optimized settings for dev with security
+vmseries_min_size = 1
+vmseries_max_size = 2
+enable_flow_logs = true  # Keep for security monitoring
+enable_traffic_mirroring = false  # Disable for cost optimization
+enable_auto_remediation = false  # Disable for development
+```
+
+##### Production Environment
+```hcl
+# Production settings with full security
 vmseries_min_size = 3
 vmseries_max_size = 6
 enable_flow_logs = true
 enable_traffic_mirroring = true
+enable_auto_remediation = true  # Enable automated remediation
+```
+
+### Step 5: Configure Enhanced Security Features
+
+#### IAM Cross-Account Access Configuration
+```hcl
+# Configure trusted accounts for cross-account access
+trusted_account_arns = [
+  "arn:aws:iam::123456789012:root",  # Development account
+  "arn:aws:iam::987654321098:root"   # Staging account
+]
+
+# Define allowed IP ranges for enhanced security
+allowed_ip_ranges = [
+  "10.0.0.0/8",      # Internal corporate network
+  "192.168.1.0/24"   # VPN access
+]
+
+# Configure allowed principal ARNs
+allowed_principal_arns = [
+  "arn:aws:iam::123456789012:role/TerraformDeploymentRole"
+]
+
+# Set allowed regions for compliance
+allowed_regions = ["us-east-1", "us-west-2"]
+```
+
+#### Automated Remediation Configuration
+```hcl
+# Enable automated security remediation
+enable_auto_remediation = true
+
+# Configure remediation scope
+remediation_scope = {
+  restrict_security_groups = true
+  enable_flow_logs        = true
+  quarantine_instances    = true
+}
+
+# SNS topic for security alerts
+security_alerts_topic = "inspection-security-alerts"
+
+# CloudWatch event patterns for remediation triggers
+remediation_triggers = [
+  "AuthorizeSecurityGroupIngress",
+  "CreateSecurityGroup",
+  "DeleteSecurityGroup",
+  "RunInstances"
+]
 ```
 
 ## Deployment
@@ -480,6 +593,32 @@ curl -v https://www.google.com
 ping 10.2.1.10  # From spoke-1 to spoke-2
 ```
 
+#### 5. Security Validation (Enhanced)
+```bash
+# Verify EBS encryption
+aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=vmseries" \
+  --query 'Reservations[*].Instances[*].Ebs.BlockDeviceMappings[*].Ebs.Encrypted'
+
+# Check security group rules
+aws ec2 describe-security-groups \
+  --group-names vmseries-sg \
+  --query 'SecurityGroups[0].IpPermissions'
+
+# Verify CloudWatch alarms
+aws cloudwatch describe-alarms \
+  --alarm-name-prefix "inspection-"
+
+# Check VPC Flow Logs
+aws ec2 describe-flow-logs \
+  --query 'FlowLogs[*].{ID:FlowLogId,State:FlowLogStatus}'
+
+# Validate data classification tags
+aws ec2 describe-instances \
+  --filters "Name=tag:DataClassification,Values=sensitive" \
+  --query 'Reservations[*].Instances[*].InstanceId'
+```
+
 ### Monitoring Validation
 
 #### 1. CloudWatch Metrics
@@ -582,6 +721,49 @@ curl https://blocked-domain.com  # Should be blocked
 ```bash
 # Generate test traffic with known threats
 # Monitor firewall logs for detection
+```
+
+### Step 5: Configure Automated Remediation (Post-Deployment)
+
+#### 1. Enable Security Event Processing
+```bash
+# Verify CloudWatch Events rule is active
+aws events list-rules --name-prefix inspection-security
+
+# Check Lambda function status
+aws lambda get-function --function-name inspection-security-automation
+
+# Verify SNS topic subscriptions
+aws sns list-subscriptions-by-topic --topic-arn $SNS_TOPIC_ARN
+```
+
+#### 2. Test Automated Remediation
+```bash
+# Create a test security group with overly permissive rules
+aws ec2 create-security-group \
+  --group-name test-overly-permissive \
+  --description "Test security group for remediation"
+
+# Add overly permissive rule (this should trigger remediation)
+aws ec2 authorize-security-group-ingress \
+  --group-id $SG_ID \
+  --protocol tcp \
+  --port 22 \
+  --cidr 0.0.0.0/0
+
+# Monitor CloudWatch logs for remediation action
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/inspection-security-automation \
+  --start-time $(date -d '5 minutes ago' +%s)
+```
+
+#### 3. Verify Security Alerts
+```bash
+# Check SNS topic for security notifications
+aws sns list-subscriptions-by-topic --topic-arn $SNS_TOPIC_ARN
+
+# Review security event history
+aws cloudwatch describe-alarms --alarm-name-prefix inspection-security
 ```
 
 ### Step 5: Documentation Updates

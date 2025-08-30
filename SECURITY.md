@@ -18,7 +18,7 @@ This comprehensive security guide outlines the security considerations, best pra
 
 ### Defense in Depth
 
-The architecture implements multiple layers of security controls:
+The architecture implements multiple layers of security controls with recent enhancements:
 
 ```mermaid
 graph TD
@@ -69,12 +69,36 @@ graph TD
 
 ### Zero Trust Architecture
 
-The solution implements zero trust principles:
+The solution implements zero trust principles with recent security enhancements:
 
 - **Never Trust, Always Verify**: All traffic is inspected regardless of source
-- **Least Privilege Access**: Minimal required permissions for all components
-- **Micro-Segmentation**: Granular network segmentation
-- **Continuous Monitoring**: Real-time threat detection and response
+- **Least Privilege Access**: Minimal required permissions for all components with explicit deny statements
+- **Micro-Segmentation**: Granular network segmentation with NACLs and security groups
+- **Continuous Monitoring**: Real-time threat detection and response with CloudWatch alarms
+- **Mandatory Encryption**: All data encrypted at rest and in transit
+- **Comprehensive Auditing**: VPC Flow Logs, TGW Flow Logs, and CloudTrail integration
+
+### Recent Security Enhancements
+
+#### Critical Security Fixes (Implemented)
+- **EBS Encryption**: Mandatory encryption for all VM-Series instances with customer-managed KMS keys
+- **IAM Least Privilege**: Strengthened IAM policies with explicit deny statements for destructive operations
+- **Security Group Hardening**: Restrictive ingress rules limiting access to specific VPC CIDR blocks
+- **Network ACLs**: Added comprehensive network segmentation with proper ingress/egress rules
+- **State Encryption**: Terraform state files encrypted with dedicated KMS keys
+
+#### High-Risk Security Improvements
+- **Enhanced Monitoring**: Security-specific CloudWatch alarms and custom dashboards
+- **Data Classification**: Comprehensive tagging with validation for data classification levels
+- **Backup Strategy**: Automated backup configuration for critical resources
+- **Threat Prevention**: Advanced threat prevention profiles with comprehensive rule sets
+- **Cross-Account Access**: Secure cross-account IAM roles with MFA requirements
+
+#### Medium-Risk Security Enhancements
+- **Validation Framework**: Input validation for security rules and configuration parameters
+- **Compliance Tagging**: Enhanced tagging strategy for multiple compliance frameworks
+- **Operational Security**: Improved operational procedures and monitoring
+- **Automated Remediation**: Lambda-based automated response to security events
 
 ## Access Control
 
@@ -900,6 +924,177 @@ aws s3 cp s3://audit-logs/ s3://incident-logs/ \
 aws ec2 create-snapshot \
   --volume-id vol-12345678 \
   --description "Forensic snapshot - incident investigation"
+```
+
+## Automated Remediation
+
+### Security Event Processing Architecture
+
+The automated remediation system provides real-time response to security events through Lambda-based automation:
+
+```mermaid
+graph TD
+    subgraph "Event Sources"
+        CW_EVENTS[CloudWatch Events]
+        CT_EVENTS[CloudTrail Events]
+        VPC_EVENTS[VPC Flow Logs]
+        FW_EVENTS[Firewall Events]
+    end
+
+    subgraph "Processing Layer"
+        LAMBDA[Security Automation Lambda]
+        SNS[Security Alerts SNS]
+        LOGS[CloudWatch Logs]
+    end
+
+    subgraph "Response Actions"
+        SG_FIX[Security Group Remediation]
+        INSTANCE_ISOLATE[Instance Isolation]
+        ALERT_ESCALATION[Alert Escalation]
+        POLICY_UPDATE[Policy Updates]
+    end
+
+    CW_EVENTS --> LAMBDA
+    CT_EVENTS --> LAMBDA
+    VPC_EVENTS --> LAMBDA
+    FW_EVENTS --> LAMBDA
+
+    LAMBDA --> SNS
+    LAMBDA --> LOGS
+    LAMBDA --> SG_FIX
+    LAMBDA --> INSTANCE_ISOLATE
+    LAMBDA --> ALERT_ESCALATION
+    LAMBDA --> POLICY_UPDATE
+
+    style LAMBDA fill:#e8f5e8
+    style SNS fill:#fff3e0
+```
+
+### Automated Remediation Actions
+
+#### Security Group Hardening
+```hcl
+# Lambda function automatically remediates overly permissive security groups
+resource "aws_lambda_function" "security_automation" {
+  function_name = "inspection-security-automation"
+  runtime       = "python3.9"
+
+  # Automatically:
+  # - Detects 0.0.0.0/0 ingress rules
+  # - Restricts to specific IP ranges
+  # - Sends security alerts
+  # - Logs remediation actions
+}
+```
+
+#### Instance Isolation
+```bash
+# Automated instance quarantine for suspicious activity
+aws ec2 modify-instance-attribute \
+  --instance-id $INSTANCE_ID \
+  --groups $QUARANTINE_SG_ID
+
+# Remove from load balancer
+aws elbv2 deregister-targets \
+  --target-group-arn $TARGET_GROUP_ARN \
+  --targets Id=$INSTANCE_ID
+```
+
+#### Access Revocation
+```bash
+# Automatic revocation of unauthorized access
+aws iam detach-user-policy \
+  --user-name $USER_NAME \
+  --policy-arn $POLICY_ARN
+
+# Update security groups
+aws ec2 revoke-security-group-ingress \
+  --group-id $SG_ID \
+  --protocol tcp \
+  --port 22 \
+  --cidr $MALICIOUS_IP/32
+```
+
+### Remediation Triggers
+
+#### CloudWatch Events Rules
+```hcl
+resource "aws_cloudwatch_event_rule" "security_events" {
+  name = "inspection-security-events"
+
+  event_pattern = jsonencode({
+    source = ["aws.ec2", "aws.elasticloadbalancing"]
+    detail-type = [
+      "AWS API Call via CloudTrail",
+      "EC2 Instance State-change Notification"
+    ]
+    detail = {
+      eventName = [
+        "AuthorizeSecurityGroupIngress",
+        "CreateSecurityGroup",
+        "RunInstances"
+      ]
+    }
+  })
+}
+```
+
+#### Custom Metrics and Alarms
+```hcl
+resource "aws_cloudwatch_metric_alarm" "unusual_traffic" {
+  alarm_name          = "inspection-unusual-traffic"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "RequestCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = "300"
+  statistic           = "Sum"
+  threshold           = "10000"
+
+  alarm_actions = [aws_sns_topic.security_alerts.arn]
+}
+```
+
+### Remediation Workflow
+
+1. **Event Detection**: CloudWatch Events capture security-related activities
+2. **Event Analysis**: Lambda function evaluates events against security policies
+3. **Risk Assessment**: Determine if automated remediation is appropriate
+4. **Automated Response**: Execute predefined remediation actions
+5. **Alert Generation**: Notify security team of remediation actions
+6. **Audit Logging**: Record all remediation activities for compliance
+
+### Configuration Management
+
+#### Remediation Scope Configuration
+```hcl
+variable "remediation_scope" {
+  description = "Configure automated remediation scope"
+  type = object({
+    restrict_security_groups = bool
+    enable_flow_logs        = bool
+    quarantine_instances    = bool
+    auto_remediate          = bool
+  })
+  default = {
+    restrict_security_groups = true
+    enable_flow_logs        = true
+    quarantine_instances    = false  # Enable in production
+    auto_remediate          = false  # Enable after testing
+  }
+}
+```
+
+#### Alert Escalation
+```hcl
+resource "aws_sns_topic" "security_alerts" {
+  name = "inspection-security-alerts"
+
+  # Configure subscriptions for different alert levels
+  # - Email for standard alerts
+  # - SMS for critical alerts
+  # - PagerDuty for immediate response
+}
 ```
 
 ## Security Best Practices

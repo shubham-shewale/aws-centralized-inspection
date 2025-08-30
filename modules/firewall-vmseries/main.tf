@@ -31,6 +31,8 @@ resource "aws_iam_role_policy" "vmseries_least_privilege" {
         Action = [
           "ec2:DescribeInstances",
           "ec2:DescribeTags",
+          "ec2:DescribeImages",
+          "ec2:DescribeSnapshots",
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
           "logs:PutLogEvents",
@@ -57,6 +59,21 @@ resource "aws_iam_role_policy" "vmseries_least_privilege" {
           "arn:aws:s3:::vmseries-bootstrap-${data.aws_caller_identity.current.account_id}",
           "arn:aws:s3:::vmseries-bootstrap-${data.aws_caller_identity.current.account_id}/*"
         ]
+      },
+      {
+        Effect = "Deny",
+        Action = [
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "ec2:TerminateInstances",
+          "ec2:StopInstances"
+        ],
+        Resource = "*",
+        Condition = {
+          StringNotEquals = {
+            "aws:PrincipalType": "AssumedRole"
+          }
+        }
       }
     ]
   })
@@ -114,15 +131,31 @@ resource "aws_launch_template" "vmseries" {
     security_groups             = [aws_security_group.vmseries.id]
   }
 
-  # CRITICAL FIX: Enable EBS encryption
+  # CRITICAL FIX: Enable EBS encryption with proper configuration
   block_device_mappings {
     device_name = "/dev/sda1"
 
     ebs {
-      encrypted   = true
-      kms_key_id  = aws_kms_key.ebs.arn
-      volume_size = 60
-      volume_type = "gp3"
+      encrypted             = true
+      kms_key_id           = aws_kms_key.ebs.arn
+      volume_size          = 60
+      volume_type          = "gp3"
+      delete_on_termination = true
+      iops                 = 3000
+      throughput           = 125
+    }
+  }
+
+  # Add secondary EBS volume for logging
+  block_device_mappings {
+    device_name = "/dev/sdb"
+
+    ebs {
+      encrypted             = true
+      kms_key_id           = aws_kms_key.ebs.arn
+      volume_size          = 40
+      volume_type          = "gp3"
+      delete_on_termination = true
     }
   }
 
@@ -184,25 +217,72 @@ resource "aws_security_group" "vmseries" {
   name_prefix = "vmseries-sg-"
   vpc_id      = var.vpc_id
 
+  # CRITICAL FIX: Restrict SSH access to specific CIDR blocks
   ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["10.0.0.0/8"]
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    cidr_blocks     = var.management_cidrs != [] ? var.management_cidrs : [var.inspection_vpc_cidr]
+    description     = "SSH access for management"
   }
 
+  # Allow GENEVE traffic from GWLB
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["10.0.0.0/8"]
+    from_port       = 6081
+    to_port         = 6081
+    protocol        = "udp"
+    cidr_blocks     = [var.inspection_vpc_cidr]
+    description     = "GENEVE traffic from Gateway Load Balancer"
+  }
+
+  # Allow health check traffic
+  ingress {
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    cidr_blocks     = [var.inspection_vpc_cidr]
+    description     = "Health check traffic"
+  }
+
+  # CRITICAL FIX: Restrictive egress rules
+  egress {
+    from_port   = 3978
+    to_port     = 3978
+    protocol    = "tcp"
+    cidr_blocks = var.panorama_ip != "" ? [var.panorama_ip] : []
+    description = "Panorama management traffic"
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS for updates and API calls"
+  }
+
+  egress {
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "DNS queries"
+  }
+
+  egress {
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "DNS queries"
+  }
+
+  egress {
+    from_port   = 123
+    to_port     = 123
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "NTP synchronization"
   }
 
   tags = merge(var.tags, { Name = "vmseries-sg" })
@@ -233,23 +313,68 @@ resource "aws_autoscaling_attachment" "vmseries" {
   lb_target_group_arn    = var.target_group_arn
 }
 
-# Bootstrap template
-resource "local_file" "bootstrap" {
+# Bootstrap S3 bucket for VM-Series configuration - CRITICAL FIX
+resource "aws_s3_bucket" "bootstrap" {
+  bucket = "vmseries-bootstrap-${data.aws_caller_identity.current.account_id}"
+
+  tags = merge(var.tags, {
+    Name    = "vmseries-bootstrap"
+    Purpose = "firewall-bootstrap"
+  })
+}
+
+resource "aws_s3_bucket_versioning" "bootstrap" {
+  bucket = aws_s3_bucket.bootstrap.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "bootstrap" {
+  bucket = aws_s3_bucket.bootstrap.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "bootstrap" {
+  bucket = aws_s3_bucket.bootstrap.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Bootstrap configuration files
+resource "aws_s3_object" "bootstrap_xml" {
+  bucket = aws_s3_bucket.bootstrap.id
+  key    = "config/bootstrap.xml"
+  content = templatefile("${path.module}/bootstrap.xml.tpl", {
+    panorama_ip       = var.panorama_ip
+    panorama_username = var.panorama_username
+    panorama_password = var.panorama_password
+  })
+  server_side_encryption = "AES256"
+}
+
+resource "aws_s3_object" "init_cfg" {
+  bucket = aws_s3_bucket.bootstrap.id
+  key    = "config/init-cfg.txt"
+  content = templatefile("${path.module}/init-cfg.txt.tpl", {
+    panorama_ip       = var.panorama_ip
+    panorama_username = var.panorama_username
+    auth_key          = var.panorama_password
+  })
+  server_side_encryption = "AES256"
+}
+
+# Bootstrap template file (for reference)
+resource "local_file" "bootstrap_template" {
   filename = "${path.module}/bootstrap.xml.tpl"
-  content  = <<EOF
-<vm-series>
-  <type>
-    <dhcp-client>
-      <send-hostname>yes</send-hostname>
-      <send-client-id>yes</send-client-id>
-      <accept-dhcp-hostname>no</accept-dhcp-hostname>
-      <accept-dhcp-domain>no</accept-dhcp-domain>
-    </dhcp-client>
-  </type>
-  <panorama-server>${var.panorama_ip}</panorama-server>
-  <auth-key>${var.panorama_password}</auth-key>
-  <dgname>aws-dg</dgname>
-  <tplname>aws-template</tplname>
-</vm-series>
-EOF
+  content  = file("${path.module}/bootstrap.xml.tpl")
 }

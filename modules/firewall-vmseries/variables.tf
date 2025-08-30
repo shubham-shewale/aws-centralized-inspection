@@ -60,6 +60,18 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "management_cidrs" {
+  description = "List of CIDR blocks allowed for management access"
+  type        = list(string)
+  default     = []
+}
+
+variable "inspection_vpc_cidr" {
+  description = "CIDR block of the inspection VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
 variable "tags" {
   description = "Common tags"
   type        = map(string)

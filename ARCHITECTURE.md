@@ -596,4 +596,118 @@ graph TD
     TGW1 -.-> TGW2
 ```
 
-This architecture document provides the foundation for understanding the AWS centralized traffic inspection solution. For implementation details, refer to the deployment guide and troubleshooting documentation.
+## Automated Remediation Architecture
+
+### Security Event Processing Flow
+
+```mermaid
+graph TD
+    subgraph "Security Events"
+        EC2_EVENTS[EC2 API Calls<br/>Security Group Changes]
+        ELB_EVENTS[ELB Events<br/>Traffic Anomalies]
+        IAM_EVENTS[IAM Events<br/>Policy Changes]
+    end
+
+    subgraph "Event Processing"
+        CW_EVENTS[CloudWatch Events]
+        LAMBDA[Lambda Function<br/>Security Automation]
+        SNS[Security Alerts<br/>SNS Topic]
+    end
+
+    subgraph "Automated Responses"
+        SG_FIX[Security Group<br/>Auto-Remediation]
+        INSTANCE_QUARANTINE[Instance Quarantine]
+        ALERT_GENERATION[Alert Generation]
+    end
+
+    subgraph "Monitoring & Logging"
+        CW_LOGS[CloudWatch Logs]
+        METRICS[Security Metrics]
+        DASHBOARDS[Security Dashboards]
+    end
+
+    EC2_EVENTS --> CW_EVENTS
+    ELB_EVENTS --> CW_EVENTS
+    IAM_EVENTS --> CW_EVENTS
+
+    CW_EVENTS --> LAMBDA
+    LAMBDA --> SNS
+    LAMBDA --> SG_FIX
+    LAMBDA --> INSTANCE_QUARANTINE
+    LAMBDA --> ALERT_GENERATION
+
+    SG_FIX --> CW_LOGS
+    INSTANCE_QUARANTINE --> CW_LOGS
+    ALERT_GENERATION --> CW_LOGS
+
+    CW_LOGS --> METRICS
+    METRICS --> DASHBOARDS
+
+    style LAMBDA fill:#e8f5e8
+    style SNS fill:#fff3e0
+    style CW_EVENTS fill:#e1f5fe
+```
+
+### Remediation Workflow
+
+1. **Event Detection**: CloudWatch Events capture security-related API calls and system events
+2. **Event Processing**: Lambda function analyzes events for security violations
+3. **Automated Response**: Immediate remediation actions for detected issues
+4. **Alert Generation**: Security team notifications via SNS
+5. **Audit Logging**: All actions logged for compliance and forensic analysis
+
+### Supported Remediation Actions
+
+- **Security Group Hardening**: Automatic restriction of overly permissive rules
+- **Instance Isolation**: Quarantine compromised or misconfigured instances
+- **Access Revocation**: Removal of unauthorized access permissions
+- **Configuration Correction**: Automatic fixing of security misconfigurations
+- **Alert Escalation**: Priority-based security incident notifications
+
+## Security Enhancements (Latest Updates)
+
+### Recent Security Improvements
+
+#### 🔒 Mandatory Encryption
+- **EBS Encryption**: All VM-Series instances now use customer-managed KMS keys
+- **S3 Encryption**: Flow logs and configuration data encrypted with KMS
+- **State Encryption**: Terraform state files encrypted with dedicated KMS keys
+- **TLS 1.2+**: Enhanced SSL/TLS configurations for secure communications
+
+#### 🛡️ Enhanced Access Controls
+- **Least Privilege IAM**: Strengthened policies with explicit deny statements
+- **Cross-Account Access**: Secure cross-account IAM roles with MFA requirements
+- **Security Group Hardening**: Restrictive ingress rules with specific port/protocol access
+- **Network ACLs**: Comprehensive network segmentation with proper ingress/egress rules
+
+#### 🤖 Automated Remediation
+- **Lambda Security Automation**: Event-driven response to security events
+- **Security Group Monitoring**: Automatic restriction of overly permissive rules
+- **CloudWatch Integration**: Real-time security event processing and alerting
+- **SNS Notifications**: Automated security incident notifications
+
+#### 📊 Advanced Monitoring
+- **VPC Flow Logs**: Enabled for all VPCs with CloudWatch integration
+- **TGW Flow Logs**: Transit Gateway traffic monitoring and analysis
+- **Security Alarms**: CloudWatch alarms for security events and threats
+- **Custom Dashboards**: Security-specific monitoring dashboards
+
+#### ✅ Compliance Framework Support
+- **PCI DSS**: Payment card data protection controls
+- **HIPAA**: Healthcare data compliance with audit logging
+- **SOC 2**: Security, availability, and confidentiality
+- **GDPR**: Data protection and privacy requirements
+- **NIST 800-53**: Federal information security controls
+
+### Architecture Validation
+
+#### Security Validation Checklist
+- [x] EBS encryption enabled with KMS
+- [x] Security groups restrict unnecessary access
+- [x] Network ACLs provide proper segmentation
+- [x] VPC Flow Logs configured and active
+- [x] CloudWatch alarms for security monitoring
+- [x] Data classification tags applied
+- [x] Compliance frameworks documented
+
+This architecture document provides the foundation for understanding the AWS centralized traffic inspection solution with enhanced security features. For implementation details, refer to the deployment guide and troubleshooting documentation.

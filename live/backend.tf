@@ -5,6 +5,7 @@ terraform {
     region         = "us-east-1"
     dynamodb_table = "aws-centralized-inspection-lock"
     encrypt        = true
-    # KMS key will be referenced by the state encryption configuration
+    # KMS key ID will be dynamically set during init
+    # kms_key_id     = "alias/terraform-state-encryption"
   }
 }

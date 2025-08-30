@@ -311,6 +311,57 @@ aws logs get-log-events \
   --log-stream-name i-1234567890abcdef
 ```
 
+#### Automated Remediation Issues
+**Symptoms:**
+- Security events not triggering remediation
+- Lambda function errors in logs
+- SNS alerts not being sent
+
+**Solutions:**
+```bash
+# Check Lambda function status
+aws lambda get-function --function-name inspection-security-automation
+
+# Review Lambda execution logs
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/inspection-security-automation \
+  --start-time $(date -d '1 hour ago' +%s)
+
+# Verify CloudWatch Events rules
+aws events list-rules --name-prefix inspection-security
+
+# Check SNS topic permissions
+aws sns list-subscriptions-by-topic --topic-arn $SNS_TOPIC_ARN
+
+# Test remediation manually
+aws lambda invoke \
+  --function-name inspection-security-automation \
+  --payload '{"test": "security-event"}' \
+  output.json
+```
+
+#### Remediation Scope Configuration Issues
+**Symptoms:**
+- Remediation actions not executing as expected
+- Overly aggressive or insufficient remediation
+
+**Solutions:**
+```bash
+# Check remediation configuration
+terraform show | grep remediation_scope
+
+# Verify IAM permissions for remediation actions
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::123456789012:role/lambda-execution-role \
+  --action-names ec2:RevokeSecurityGroupIngress ec2:ModifyInstanceAttribute
+
+# Review CloudWatch alarms configuration
+aws cloudwatch describe-alarms --alarm-name-prefix inspection
+
+# Test remediation scope settings
+terraform plan -var="enable_auto_remediation=false"
+```
+
 ## Performance Issues
 
 ### High Latency
@@ -515,6 +566,9 @@ aws ec2 describe-vpc-endpoints --vpc-endpoint-ids $ENDPOINT_ID
 
 # Check firewall policy order
 show security policy
+
+# Verify security group rules (enhanced security)
+aws ec2 describe-security-groups --group-ids $SG_ID --query 'SecurityGroups[0].IpPermissions'
 ```
 
 #### False Positives/Negatives
@@ -532,6 +586,91 @@ show threat vault statistics
 
 # Adjust policy rules
 # Update threat prevention profiles
+
+# Validate security rules configuration
+terraform validate
+terraform plan -var-file=envs/prod.tfvars
+```
+
+### Encryption and Key Management Issues
+
+#### KMS Key Access Problems
+**Symptoms:**
+- EBS encryption failures
+- S3 bucket access denied
+- Terraform state encryption errors
+
+**Solutions:**
+```bash
+# Check KMS key permissions
+aws kms describe-key --key-id $KMS_KEY_ID
+
+# Verify IAM permissions for KMS
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::123456789012:role/terraform-role \
+  --action-names kms:CreateGrant kms:DescribeKey kms:Decrypt kms:GenerateDataKey \
+  --resource-arns arn:aws:kms:us-east-1:123456789012:key/*
+
+# Check key rotation status
+aws kms get-key-rotation-status --key-id $KMS_KEY_ID
+```
+
+#### Certificate Validation Issues
+**Symptoms:**
+- SSL/TLS handshake failures
+- Certificate validation errors
+
+**Solutions:**
+```bash
+# Check ACM certificate status
+aws acm describe-certificate --certificate-arn $CERT_ARN
+
+# Verify certificate chain
+openssl s_client -connect example.com:443 -servername example.com
+
+# Check CloudFront distribution configuration
+aws cloudfront get-distribution --id $DISTRIBUTION_ID
+```
+
+### Access Control Issues
+
+#### IAM Permission Denied
+**Symptoms:**
+- Terraform apply fails with AccessDenied
+- Resources cannot be created or modified
+
+**Solutions:**
+```bash
+# Check current IAM permissions
+aws sts get-caller-identity
+
+# Simulate policy evaluation
+aws iam simulate-principal-policy \
+  --policy-source-arn arn:aws:iam::123456789012:role/terraform-role \
+  --action-names ec2:CreateVpc iam:CreateRole
+
+# Verify MFA requirements (if enabled)
+aws sts get-session-token --serial-number arn:aws:iam::123456789012:mfa/user --token-code 123456
+```
+
+#### Cross-Account Access Failures
+**Symptoms:**
+- Assume role operations failing
+- Cross-account resource access denied
+
+**Solutions:**
+```bash
+# Check trust relationship
+aws iam get-role --role-name cross-account-role --query 'Role.AssumeRolePolicyDocument'
+
+# Verify external ID (if used)
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/cross-account-role \
+  --role-session-name test-session \
+  --external-id your-external-id
+
+# Check account limits
+aws service-quotas get-service-quota --service-code iam --quota-code L-0DA4ABF3
 ```
 
 ### Authentication Issues

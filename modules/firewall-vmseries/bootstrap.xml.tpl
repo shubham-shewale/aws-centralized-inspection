@@ -1,0 +1,14 @@
+<vm-series>
+  <type>
+    <dhcp-client>
+      <send-hostname>yes</send-hostname>
+      <send-client-id>yes</send-client-id>
+      <accept-dhcp-hostname>no</accept-dhcp-hostname>
+      <accept-dhcp-domain>no</accept-dhcp-domain>
+    </dhcp-client>
+  </type>
+  <panorama-server>${panorama_ip}</panorama-server>
+  <auth-key>${panorama_password}</auth-key>
+  <dgname>aws-dg</dgname>
+  <tplname>aws-template</tplname>
+</vm-series>

@@ -24,7 +24,7 @@ resource "aws_flow_log" "tgw" {
 
 # Enhanced Monitoring and Alerting - MEDIUM RISK FIX
 
-# CloudWatch Dashboard for Security Monitoring
+# CloudWatch Dashboard for Security Monitoring - FIXED
 resource "aws_cloudwatch_dashboard" "security" {
   dashboard_name = "inspection-security-dashboard"
 
@@ -34,17 +34,15 @@ resource "aws_cloudwatch_dashboard" "security" {
         type = "metric",
         properties = {
           metrics = [
-            ["AWS/GatewayELB", "UnHealthyHostCount", "LoadBalancer", var.gwlb_arn],
-            ["AWS/EC2", "CPUUtilization", "AutoScalingGroupName", var.vmseries_asg_name],
-            ["AWS/VPN", "TunnelState", "VpnId", var.vpn_id],
+            ["AWS/GatewayELB", "UnHealthyHostCount", "LoadBalancer", "inspection-gwlb"],
+            ["AWS/EC2", "CPUUtilization", "AutoScalingGroupName", "vmseries-asg"],
             ["Inspection", "ThreatCount"],
-            ["Inspection", "BlockedConnections"],
-            ["Inspection", "AnomalyScore"]
+            ["Inspection", "BlockedConnections"]
           ]
           title = "Security Metrics Overview"
           view = "timeSeries"
           stacked = false
-          region = var.aws_region
+          region = data.aws_region.current.name
           stat = "Average"
           period = 300
         }
@@ -55,12 +53,20 @@ resource "aws_cloudwatch_dashboard" "security" {
           query = "SOURCE '${aws_cloudwatch_log_group.flow_logs.name}' | fields @timestamp, @message | sort @timestamp desc | limit 100"
           title = "Recent Security Events"
           view = "table"
-          region = var.aws_region
+          region = data.aws_region.current.name
         }
       }
     ]
   })
+
+  tags = merge(var.tags, {
+    Name = "security-dashboard"
+    Purpose = "security-monitoring"
+  })
 }
+
+# Data source for current region
+data "aws_region" "current" {}
 
 # CloudWatch Alarms for Critical Security Events
 resource "aws_cloudwatch_metric_alarm" "unhealthy_instances" {

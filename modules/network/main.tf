@@ -266,7 +266,7 @@ resource "aws_flow_log" "inspection_vpc" {
   tags = merge(var.tags, { Name = "inspection-vpc-flow-logs" })
 }
 
-# IAM role for VPC Flow Logs
+# IAM role for VPC Flow Logs - ENHANCED SECURITY
 resource "aws_iam_role" "flow_log" {
   name = "inspection-flow-log-role"
 
@@ -279,11 +279,22 @@ resource "aws_iam_role" "flow_log" {
           Service = "vpc-flow-logs.amazonaws.com"
         }
         Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount": data.aws_caller_identity.current.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn": "arn:aws:ec2:*:${data.aws_caller_identity.current.account_id}:vpc/*"
+          }
+        }
       }
     ]
   })
 
-  tags = merge(var.tags, { Name = "flow-log-role" })
+  tags = merge(var.tags, {
+    Name = "flow-log-role"
+    Purpose = "vpc-flow-logs"
+  })
 }
 
 resource "aws_iam_role_policy" "flow_log" {
@@ -300,13 +311,25 @@ resource "aws_iam_role_policy" "flow_log" {
           "logs:CreateLogStream",
           "logs:PutLogEvents",
           "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
           "logs:DescribeLogStreams"
         ]
-        Resource = "*"
+        Resource = [
+          "arn:aws:logs:*:*:log-group:/aws/vpc/flow-logs/*",
+          "arn:aws:logs:*:*:log-group:/aws/vpc/flow-logs/*:log-stream:*"
+        ]
+        Condition = {
+          StringEquals = {
+            "aws:ResourceAccount": data.aws_caller_identity.current.account_id
+          }
+        }
       }
     ]
   })
 }
+
+# Data source for account ID
+data "aws_caller_identity" "current" {}
 
 # CloudWatch Log Group for Flow Logs
 resource "aws_cloudwatch_log_group" "flow_logs" {

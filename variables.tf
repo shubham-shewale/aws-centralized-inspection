@@ -214,4 +214,18 @@ variable "tags" {
     ReservedInstance = "eligible"
     SpotInstance     = "ineligible"
   }
+
+  validation {
+    condition = contains([
+      "public", "internal", "sensitive", "restricted", "confidential"
+    ], lookup(var.tags, "DataClassification", "sensitive"))
+    error_message = "DataClassification must be one of: public, internal, sensitive, restricted, confidential."
+  }
+
+  validation {
+    condition = contains([
+      "none", "required", "optional"
+    ], lookup(var.tags, "EncryptionAtRest", "required"))
+    error_message = "EncryptionAtRest must be one of: none, required, optional."
+  }
 }

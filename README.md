@@ -86,13 +86,19 @@ graph TB
 ## ✨ Key Features
 
 - **🔄 Dual Firewall Support**: Seamless switching between VM-Series and Cloud NGFW
-- **📈 Auto-scaling**: VM-Series instances scale based on CPU/memory metrics
-- **📊 Advanced Observability**: VPC Flow Logs, TGW Flow Logs, and Traffic Mirroring
-- **🏗️ Modular Design**: Reusable Terraform modules with clear separation of concerns
-- **🔀 Conditional Logic**: Deploy only required components based on configuration
-- **🔒 Security-First**: Comprehensive security policies and compliance tagging
-- **💰 Cost Optimization**: Feature toggles for selective resource deployment
-- **🚀 CI/CD Ready**: GitHub Actions workflows and Makefile automation
+- **📈 Auto-scaling**: VM-Series instances scale based on CPU/memory metrics with enhanced health checks
+- **📊 Advanced Observability**: VPC Flow Logs, TGW Flow Logs, and Traffic Mirroring with custom dashboards
+- **🏗️ Modular Design**: Reusable Terraform modules with clear separation of concerns and improved error handling
+- **🔀 Conditional Logic**: Deploy only required components based on configuration with validation
+- **🔒 Security-First**: Comprehensive security policies, compliance tagging, and encryption everywhere
+- **💰 Cost Optimization**: Feature toggles for selective resource deployment with monitoring
+- **🚀 CI/CD Ready**: GitHub Actions workflows and Makefile automation with comprehensive validation
+- **🛡️ Enhanced Security**: Mandatory EBS encryption, least privilege IAM, and network segmentation
+- **📋 Compliance Ready**: PCI DSS, HIPAA, SOC 2, GDPR, and NIST 800-53 framework support
+- **🔍 Advanced Monitoring**: Security-specific CloudWatch alarms and automated remediation
+- **🤖 Automated Remediation**: Lambda-based automated response to security events and policy violations
+- **🔐 Enhanced IAM Security**: Cross-account access controls with explicit deny statements and MFA support
+- **📝 Security Automation**: Event-driven security responses with SNS notifications and CloudWatch integration
 
 ## 📋 Prerequisites
 
@@ -129,6 +135,12 @@ Ensure your AWS credentials have the following permissions:
 ### Palo Alto Networks Requirements
 - **For VM-Series**: Panorama server for centralized management
 - **For Cloud NGFW**: Cloud NGFW subscription and appropriate AWS permissions
+
+### Enhanced Security Requirements
+- **KMS Keys**: Customer-managed KMS keys for encryption at rest
+- **IAM Roles**: Cross-account IAM roles with least privilege permissions
+- **Security Groups**: Restrictive security groups with explicit deny rules
+- **VPC Flow Logs**: Enabled for all VPCs with CloudWatch integration
 
 ## 🚀 Quick Start
 
@@ -216,6 +228,8 @@ aws-centralized-inspection/
 
 ### Configuration Modules
 - `modules/panos-config`: PAN-OS security policies
+- `modules/iam`: Enhanced IAM security with least privilege and cross-account access
+- `modules/automated-remediation`: Automated security response and remediation
 
 ## ⚙️ Configuration
 
@@ -375,6 +389,29 @@ cross_zone_load_balancing = true
 multi_az_deployment = true
 ```
 
+### Automated Remediation Configuration
+```hcl
+# Enable automated security remediation
+enable_auto_remediation = true
+
+# Configure remediation scope
+remediation_scope = {
+  restrict_security_groups = true
+  enable_flow_logs        = true
+  quarantine_instances    = false  # Set to true for production
+}
+
+# SNS topic for security alerts
+security_alerts_topic = "inspection-security-alerts"
+
+# CloudWatch event patterns for remediation triggers
+remediation_triggers = [
+  "AuthorizeSecurityGroupIngress",
+  "CreateSecurityGroup",
+  "DeleteSecurityGroup"
+]
+```
+
 ## 📊 Outputs
 
 The deployment provides comprehensive outputs for integration and monitoring:
@@ -425,27 +462,31 @@ log_group_names = ["/aws/vpc/flow-logs/inspection", "/aws/tgw/flow-logs"]
 
 ### Network Security
 - **Zero Trust Architecture**: All traffic inspected regardless of source/destination
-- **Defense in Depth**: Multiple security layers (GWLB, firewalls, route controls)
+- **Defense in Depth**: Multiple security layers (GWLB, firewalls, route controls, NACLs)
 - **Symmetric Routing**: Ensures stateful inspection for return traffic
 - **Network Segmentation**: Dedicated inspection VPC isolates security infrastructure
+- **Enhanced Security Groups**: Restrictive ingress rules with specific port/protocol access
 
 ### Access Control
-- **Least Privilege**: IAM roles with minimal required permissions
+- **Least Privilege IAM**: Granular permissions with explicit deny statements
 - **Cross-Account Support**: Assume role patterns for multi-account deployments
 - **SSH Key Management**: Secure key pair management for VM-Series access
 - **API Authentication**: Secure credential handling for Panorama integration
+- **MFA Requirements**: Support for multi-factor authentication policies
 
 ### Data Protection
-- **Encryption at Rest**: S3 buckets encrypted with KMS
-- **Encryption in Transit**: TLS 1.2+ for all communications
+- **Mandatory Encryption**: EBS volumes encrypted with customer-managed KMS keys
+- **Encryption at Rest**: S3 buckets encrypted with KMS and versioning enabled
+- **Encryption in Transit**: TLS 1.2+ for all communications with security policies
 - **Sensitive Data Handling**: Terraform sensitive variables for credentials
-- **Audit Logging**: Comprehensive CloudTrail and VPC Flow Logs
+- **Audit Logging**: Comprehensive CloudTrail, VPC Flow Logs, and TGW Flow Logs
 
 ### Compliance
-- **PCI DSS**: Payment card data protection
-- **HIPAA**: Healthcare data compliance
-- **SOC 2**: Security, availability, and confidentiality
-- **GDPR**: Data protection and privacy
+- **PCI DSS**: Payment card data protection with encryption and access controls
+- **HIPAA**: Healthcare data compliance with audit logging and encryption
+- **SOC 2**: Security, availability, and confidentiality controls
+- **GDPR**: Data protection and privacy with comprehensive tagging
+- **NIST 800-53**: Federal information security controls and best practices
 
 ### Security Best Practices
 ```hcl
@@ -462,6 +503,17 @@ resource "aws_security_group" "inspection" {
 
   # No public ingress
   # Egress restricted to necessary services
+}
+
+# Automated remediation example
+resource "aws_lambda_function" "security_automation" {
+  function_name = "inspection-security-automation"
+  runtime       = "python3.9"
+  handler       = "lambda_function.lambda_handler"
+
+  # Automatically responds to security events
+  # Restricts overly permissive security groups
+  # Sends alerts for policy violations
 }
 ```
 

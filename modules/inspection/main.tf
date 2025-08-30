@@ -3,7 +3,7 @@ resource "aws_security_group" "gwlb" {
   name_prefix = "gwlb-sg-"
   vpc_id      = var.inspection_vpc_id
 
-  # CRITICAL FIX: Restrict ingress to spoke VPCs only
+  # CRITICAL FIX: Restrict ingress to spoke VPCs only with specific ports
   ingress {
     from_port   = 6081
     to_port     = 6081
@@ -12,22 +12,64 @@ resource "aws_security_group" "gwlb" {
     description = "Allow GENEVE traffic from spoke VPCs"
   }
 
-  # Allow health checks from inspection VPC
+  # Allow health checks from inspection VPC only
   ingress {
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    cidr_blocks     = [var.inspection_vpc_cidr]
+    description     = "Allow SSH health checks from inspection VPC"
+  }
+
+  # Allow HTTPS health checks for enhanced monitoring
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    cidr_blocks     = [var.inspection_vpc_cidr]
+    description     = "Allow HTTPS health checks"
+  }
+
+  # CRITICAL FIX: Restrictive egress - only necessary traffic
+  egress {
+    from_port   = 6081
+    to_port     = 6081
+    protocol    = "udp"
+    cidr_blocks = var.spoke_vpc_cidrs
+    description = "Allow GENEVE return traffic to spoke VPCs"
+  }
+
+  egress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.inspection_vpc_cidr]
-    description = "Allow SSH health checks"
+    description = "Allow SSH responses to inspection VPC"
   }
 
-  # Restrictive egress - only necessary traffic
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = concat(var.spoke_vpc_cidrs, [var.inspection_vpc_cidr])
-    description = "Allow traffic to spoke VPCs and inspection VPC"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.inspection_vpc_cidr]
+    description = "Allow HTTPS responses to inspection VPC"
+  }
+
+  # Allow DNS resolution
+  egress {
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow DNS queries"
+  }
+
+  egress {
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow DNS queries"
   }
 
   tags = merge(var.tags, {
