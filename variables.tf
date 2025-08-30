@@ -140,12 +140,29 @@ variable "security_rules" {
   default = []
 }
 
-# Tags
+# Data Classification Tags - HIGH RISK FIX
+variable "data_classification" {
+  description = "Data classification level for resources"
+  type        = string
+  default     = "sensitive"
+  validation {
+    condition     = contains(["public", "internal", "sensitive", "restricted"], var.data_classification)
+    error_message = "Data classification must be one of: public, internal, sensitive, restricted."
+  }
+}
+
+# Tags with Data Classification - HIGH RISK FIX
 variable "tags" {
   description = "Common tags to apply to all resources"
   type        = map(string)
   default = {
-    Environment = "production"
-    Project     = "centralized-inspection"
+    Environment        = "production"
+    Project           = "centralized-inspection"
+    DataClassification = "sensitive"
+    EncryptionAtRest  = "required"
+    Backup            = "required"
+    Owner             = "security-team"
+    CostCenter        = "security-operations"
+    Compliance        = "pci-dss,hipaa,soc2"
   }
 }

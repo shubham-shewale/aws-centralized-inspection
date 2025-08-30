@@ -18,7 +18,52 @@ resource "aws_iam_role" "vmseries" {
   tags = merge(var.tags, { Name = "vmseries-role" })
 }
 
-resource "aws_iam_role_policy_attachment" "vmseries" {
+# HIGH RISK FIX: Strengthen IAM policies with least privilege
+resource "aws_iam_role_policy" "vmseries_least_privilege" {
+  name = "vmseries-least-privilege-policy"
+  role = aws_iam_role.vmseries.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances",
+          "ec2:DescribeTags",
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "ssm:UpdateInstanceInformation",
+          "ssm:ListAssociations",
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion": [var.aws_region]
+          }
+        }
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          "arn:aws:s3:::vmseries-bootstrap-${data.aws_caller_identity.current.account_id}",
+          "arn:aws:s3:::vmseries-bootstrap-${data.aws_caller_identity.current.account_id}/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Attach AWS managed policies only if necessary
+resource "aws_iam_role_policy_attachment" "vmseries_ssm" {
   role       = aws_iam_role.vmseries.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
@@ -28,7 +73,30 @@ resource "aws_iam_instance_profile" "vmseries" {
   role = aws_iam_role.vmseries.name
 }
 
-# Launch template
+# KMS key for EBS encryption
+resource "aws_kms_key" "ebs" {
+  description             = "KMS key for VM-Series EBS encryption"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, { Name = "vmseries-ebs-encryption-key" })
+}
+
+# Launch template with EBS encryption
 resource "aws_launch_template" "vmseries" {
   name_prefix   = "vmseries-"
   image_id      = data.aws_ami.vmseries.id
@@ -46,6 +114,18 @@ resource "aws_launch_template" "vmseries" {
     security_groups             = [aws_security_group.vmseries.id]
   }
 
+  # CRITICAL FIX: Enable EBS encryption
+  block_device_mappings {
+    device_name = "/dev/sda1"
+
+    ebs {
+      encrypted   = true
+      kms_key_id  = aws_kms_key.ebs.arn
+      volume_size = 60
+      volume_type = "gp3"
+    }
+  }
+
   user_data = base64encode(templatefile("${path.module}/bootstrap.xml.tpl", {
     panorama_ip       = var.panorama_ip
     panorama_username = var.panorama_username
@@ -53,7 +133,22 @@ resource "aws_launch_template" "vmseries" {
   }))
 
   tags = merge(var.tags, { Name = "vmseries-lt" })
+
+  # Security hardening
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+    instance_metadata_tags      = "enabled"
+  }
+
+  monitoring {
+    enabled = true
+  }
 }
+
+# Data sources
+data "aws_caller_identity" "current" {}
 
 # AMI data source
 data "aws_ami" "vmseries" {

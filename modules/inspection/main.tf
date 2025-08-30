@@ -1,23 +1,40 @@
-# Security group for GWLB
+# Security group for GWLB - CRITICAL FIX: Restrict ingress
 resource "aws_security_group" "gwlb" {
   name_prefix = "gwlb-sg-"
   vpc_id      = var.inspection_vpc_id
 
+  # CRITICAL FIX: Restrict ingress to spoke VPCs only
   ingress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = 6081
+    to_port     = 6081
+    protocol    = "udp"
+    cidr_blocks = var.spoke_vpc_cidrs
+    description = "Allow GENEVE traffic from spoke VPCs"
   }
 
+  # Allow health checks from inspection VPC
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.inspection_vpc_cidr]
+    description = "Allow SSH health checks"
+  }
+
+  # Restrictive egress - only necessary traffic
   egress {
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = concat(var.spoke_vpc_cidrs, [var.inspection_vpc_cidr])
+    description = "Allow traffic to spoke VPCs and inspection VPC"
   }
 
-  tags = merge(var.tags, { Name = "gwlb-sg" })
+  tags = merge(var.tags, {
+    Name        = "gwlb-sg"
+    Purpose     = "traffic-inspection"
+    Environment = var.tags["Environment"]
+  })
 }
 
 # GWLB
@@ -104,6 +121,23 @@ resource "aws_route" "inspection_to_internet" {
   route_table_id         = var.inspection_private_route_table_ids[count.index]
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = var.internet_gateway_id
+}
+
+# AWS Shield Advanced for DDoS Protection - HIGH RISK FIX
+resource "aws_shield_protection" "gwlb" {
+  name         = "inspection-gwlb-ddos-protection"
+  resource_arn = aws_lb.gwlb.arn
+
+  tags = merge(var.tags, { Name = "gwlb-shield-protection" })
+}
+
+# AWS Shield protection for associated resources
+resource "aws_shield_protection" "alb" {
+  count        = var.enable_internet_facing ? 1 : 0
+  name         = "inspection-alb-ddos-protection"
+  resource_arn = var.internet_facing_alb_arn
+
+  tags = merge(var.tags, { Name = "alb-shield-protection" })
 }
 
 # Note: GWLB routing requires careful configuration for symmetric flows

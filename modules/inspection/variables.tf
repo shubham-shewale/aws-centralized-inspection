@@ -23,6 +23,11 @@ variable "spoke_vpc_cidrs" {
   type        = list(string)
 }
 
+variable "inspection_vpc_cidr" {
+  description = "CIDR block of the inspection VPC"
+  type        = string
+}
+
 variable "spoke_route_table_ids" {
   description = "IDs of the spoke route tables"
   type        = list(string)
@@ -41,6 +46,18 @@ variable "transit_gateway_id" {
 variable "internet_gateway_id" {
   description = "ID of the Internet Gateway"
   type        = string
+}
+
+variable "enable_internet_facing" {
+  description = "Enable internet-facing ALB protection"
+  type        = bool
+  default     = false
+}
+
+variable "internet_facing_alb_arn" {
+  description = "ARN of the internet-facing ALB to protect"
+  type        = string
+  default     = ""
 }
 
 variable "tags" {

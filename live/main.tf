@@ -18,12 +18,25 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# IAM Security Module - HIGH RISK FIX
+module "iam" {
+  source = "../modules/iam"
+
+  environment           = "production"
+  trusted_account_arns  = var.trusted_account_arns
+  allowed_ip_ranges     = var.allowed_ip_ranges
+  allowed_principal_arns = var.allowed_principal_arns
+  allowed_regions       = var.allowed_regions
+  tags                  = var.tags
+}
+
 # Inspection module (for VM-Series)
 module "inspection" {
   count  = var.inspection_engine == "vmseries" ? 1 : 0
   source = "../modules/inspection"
 
   inspection_vpc_id             = module.network.inspection_vpc_id
+  inspection_vpc_cidr           = var.vpc_cidr
   public_subnet_ids             = module.network.inspection_public_subnet_ids
   spoke_vpc_ids                 = module.network.spoke_vpc_ids
   spoke_private_subnet_ids      = module.network.spoke_private_subnet_ids
@@ -40,6 +53,7 @@ module "firewall_vmseries" {
   count  = var.inspection_engine == "vmseries" ? 1 : 0
   source = "../modules/firewall-vmseries"
 
+  aws_region         = var.aws_region
   vpc_id             = module.network.inspection_vpc_id
   subnet_ids         = module.network.inspection_private_subnet_ids
   target_group_arn   = module.inspection[0].target_group_arn
@@ -89,12 +103,69 @@ module "observability" {
   tags                  = var.tags
 }
 
-# S3 bucket for logs (placeholder)
+# S3 bucket for logs with security enhancements - HIGH RISK FIX
 resource "aws_s3_bucket" "logs" {
   count  = var.enable_flow_logs ? 1 : 0
   bucket = "aws-centralized-inspection-logs-${random_string.suffix.result}"
 }
 
+resource "aws_s3_bucket_versioning" "logs" {
+  count  = var.enable_flow_logs ? 1 : 0
+  bucket = aws_s3_bucket.logs[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  count  = var.enable_flow_logs ? 1 : 0
+  bucket = aws_s3_bucket.logs[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "logs" {
+  count  = var.enable_flow_logs ? 1 : 0
+  bucket = aws_s3_bucket.logs[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# KMS key for state encryption - HIGH RISK FIX
+resource "aws_kms_key" "state" {
+  description             = "KMS key for Terraform state encryption"
+  deletion_window_in_days = 30
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, { Name = "terraform-state-encryption" })
+}
+
+# Data source for account information
+data "aws_caller_identity" "current" {}
+
+# Random suffix for unique resource names
 resource "random_string" "suffix" {
   length  = 8
   lower   = true

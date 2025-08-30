@@ -79,6 +79,71 @@ resource "aws_route_table" "private" {
   tags = merge(var.tags, { Name = "inspection-private-rt-${count.index}" })
 }
 
+# Network ACLs for enhanced security - CRITICAL FIX
+resource "aws_network_acl" "inspection" {
+  vpc_id = aws_vpc.inspection.id
+
+  # Allow all traffic within VPC
+  ingress {
+    protocol   = "-1"
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = var.vpc_cidr
+    from_port  = 0
+    to_port    = 0
+  }
+
+  # Allow traffic from spoke VPCs
+  dynamic "ingress" {
+    for_each = var.spoke_vpc_cidrs
+    content {
+      protocol   = "-1"
+      rule_no    = 200 + index(var.spoke_vpc_cidrs, ingress.value)
+      action     = "allow"
+      cidr_block = ingress.value
+      from_port  = 0
+      to_port    = 0
+    }
+  }
+
+  # Deny all other inbound
+  ingress {
+    protocol   = "-1"
+    rule_no    = 1000
+    action     = "deny"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
+  # Allow all outbound
+  egress {
+    protocol   = "-1"
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
+  tags = merge(var.tags, { Name = "inspection-nacl" })
+}
+
+# Associate NACL with subnets
+resource "aws_network_acl_association" "inspection_public" {
+  count = length(var.public_subnets)
+
+  network_acl_id = aws_network_acl.inspection.id
+  subnet_id      = aws_subnet.public[count.index].id
+}
+
+resource "aws_network_acl_association" "inspection_private" {
+  count = length(var.private_subnets)
+
+  network_acl_id = aws_network_acl.inspection.id
+  subnet_id      = aws_subnet.private[count.index].id
+}
+
 # Route table associations
 resource "aws_route_table_association" "public" {
   count = length(var.public_subnets)
@@ -189,6 +254,84 @@ resource "aws_ec2_transit_gateway_route_table_association" "spoke" {
 
   transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.spoke[count.index].id
   transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.spoke.id
+}
+
+# VPC Flow Logs - HIGH RISK FIX
+resource "aws_flow_log" "inspection_vpc" {
+  iam_role_arn    = aws_iam_role.flow_log.arn
+  log_destination = aws_cloudwatch_log_group.flow_logs.arn
+  traffic_type    = "ALL"
+  vpc_id          = aws_vpc.inspection.id
+
+  tags = merge(var.tags, { Name = "inspection-vpc-flow-logs" })
+}
+
+# IAM role for VPC Flow Logs
+resource "aws_iam_role" "flow_log" {
+  name = "inspection-flow-log-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "vpc-flow-logs.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+
+  tags = merge(var.tags, { Name = "flow-log-role" })
+}
+
+resource "aws_iam_role_policy" "flow_log" {
+  name = "inspection-flow-log-policy"
+  role = aws_iam_role.flow_log.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# CloudWatch Log Group for Flow Logs
+resource "aws_cloudwatch_log_group" "flow_logs" {
+  name              = "/aws/vpc/flow-logs/inspection"
+  retention_in_days = 30
+
+  tags = merge(var.tags, { Name = "inspection-flow-logs" })
+}
+
+# TGW Flow Logs
+resource "aws_ec2_transit_gateway_flow_log" "this" {
+  transit_gateway_id             = aws_ec2_transit_gateway.this.id
+  iam_role_arn                   = aws_iam_role.flow_log.arn
+  log_destination_type           = "cloud-watch-logs"
+  log_destination                = aws_cloudwatch_log_group.tgw_flow_logs.arn
+  max_aggregation_interval       = 60
+
+  tags = merge(var.tags, { Name = "tgw-flow-logs" })
+}
+
+resource "aws_cloudwatch_log_group" "tgw_flow_logs" {
+  name              = "/aws/tgw/flow-logs/inspection"
+  retention_in_days = 30
+
+  tags = merge(var.tags, { Name = "tgw-flow-logs" })
 }
 
 # TGW Route Propagations
