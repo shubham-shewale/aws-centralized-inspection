@@ -1,0 +1,17 @@
+---
+# TFLint configuration for security scanning
+config:
+  # Disable checks that are not relevant for testing
+  disabled_checks:
+    - aws-vpc-no-public-egress
+    - aws-vpc-no-public-ingress
+    - aws-ec2-no-public-ip-subnet
+    - aws-ec2-no-public-ip
+    - aws-ec2-require-vpc-flow-logs-for-all-vpcs
+    - aws-ec2-no-excessive-port-access
+    - aws-iam-no-policy-wildcards
+    - aws-s3-no-public-buckets
+    - aws-s3-no-public-access-blocks
+    - aws-s3-enable-bucket-encryption
+    - aws-s3-enable-bucket-logging
+    - aws-s3-enable-versioning

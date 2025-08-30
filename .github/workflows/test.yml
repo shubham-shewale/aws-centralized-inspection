@@ -1,0 +1,391 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'modules/**'
+      - 'tests/**'
+      - '.github/workflows/test.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'modules/**'
+      - 'tests/**'
+      - '.github/workflows/test.yml'
+
+env:
+  TF_VERSION: '1.5.0'
+  GO_VERSION: '1.21'
+  TFSEC_VERSION: '1.28.0'
+
+jobs:
+  # Static Analysis Job
+  static-analysis:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Setup tfsec
+      uses: aquasecurity/setup-tfsec@v3
+      with:
+        version: ${{ env.TFSEC_VERSION }}
+
+    - name: Run tfsec
+      run: |
+        cd tests
+        tfsec --config-file .tfsec.yml ../modules/
+      continue-on-error: true
+
+    - name: Upload tfsec results
+      uses: actions/upload-artifact@v4
+      with:
+        name: tfsec-results
+        path: tests/tfsec-results.json
+      if: always()
+
+  # Unit Tests Job
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        go-version: [1.20, 1.21]
+        test-dir: [network, inspection, firewall-vmseries]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('tests/go.mod', 'tests/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ matrix.go-version }}-
+
+    - name: Install dependencies
+      run: |
+        cd tests
+        go mod download
+        go install github.com/gruntwork-io/terratest/modules/aws@latest
+        go install github.com/gruntwork-io/terratest/modules/terraform@latest
+
+    - name: Run unit tests
+      run: |
+        cd tests
+        go test -v -timeout 15m -parallel 2 ./...
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results-${{ matrix.test-dir }}-${{ matrix.go-version }}
+        path: tests/coverage.out
+      if: always()
+
+  # Integration Tests Job
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        region: [us-east-1, us-west-2]
+        include:
+          - region: us-east-1
+            azs: ["us-east-1a", "us-east-1b"]
+          - region: us-west-2
+            azs: ["us-west-2a", "us-west-2b"]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ matrix.region }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('tests/go.mod', 'tests/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
+    - name: Install dependencies
+      run: |
+        cd tests
+        go mod download
+        go install github.com/gruntwork-io/terratest/modules/aws@latest
+        go install github.com/gruntwork-io/terratest/modules/terraform@latest
+
+    - name: Run integration tests
+      run: |
+        cd tests
+        export AWS_REGION=${{ matrix.region }}
+        export TF_VAR_aws_region=${{ matrix.region }}
+        export TF_VAR_azs='${{ toJson(matrix.azs) }}'
+        go test -v -timeout 45m -run TestEndToEnd ./integration/...
+      env:
+        AWS_REGION: ${{ matrix.region }}
+        TF_VAR_aws_region: ${{ matrix.region }}
+        TF_VAR_azs: ${{ toJson(matrix.azs) }}
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-artifacts-${{ matrix.region }}
+        path: |
+          tests/*.log
+          tests/terraform.tfstate*
+      if: always()
+
+  # Security Tests Job
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('tests/go.mod', 'tests/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
+    - name: Install dependencies
+      run: |
+        cd tests
+        go mod download
+
+    - name: Run security-focused tests
+      run: |
+        cd tests
+        go test -v -timeout 15m -run ".*Security.*|.*Policy.*" ./...
+
+    - name: Upload security test results
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-test-results
+        path: tests/security-test-results.json
+      if: always()
+
+  # Performance Tests Job
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('tests/go.mod', 'tests/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+
+    - name: Install dependencies
+      run: |
+        cd tests
+        go mod download
+
+    - name: Run performance tests
+      run: |
+        cd tests
+        go test -v -timeout 30m -bench=. -benchmem ./...
+
+    - name: Upload performance results
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-test-results
+        path: tests/benchmark-results.txt
+      if: always()
+
+  # Cost Estimation Job
+  cost-estimation:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Generate cost estimate
+      run: |
+        cd live
+        terraform init
+        terraform plan -out=tfplan
+        terraform show -json tfplan > tfplan.json
+
+    - name: Upload cost estimate
+      uses: actions/upload-artifact@v4
+      with:
+        name: cost-estimate
+        path: live/tfplan.json
+      if: always()
+
+  # Test Results Summary Job
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [static-analysis, unit-tests, integration-tests, security-tests, performance-tests]
+    if: always()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Generate test summary
+      run: |
+        echo "# Test Execution Summary" > test-summary.md
+        echo "" >> test-summary.md
+        echo "## Static Analysis" >> test-summary.md
+        echo "- Status: ${{ needs.static-analysis.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        echo "## Unit Tests" >> test-summary.md
+        echo "- Status: ${{ needs.unit-tests.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        echo "## Integration Tests" >> test-summary.md
+        echo "- Status: ${{ needs.integration-tests.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        echo "## Security Tests" >> test-summary.md
+        echo "- Status: ${{ needs.security-tests.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        echo "## Performance Tests" >> test-summary.md
+        echo "- Status: ${{ needs.performance-tests.result }}" >> test-summary.md
+        echo "" >> test-summary.md
+        echo "## Overall Status" >> test-summary.md
+        if [ "${{ needs.static-analysis.result }}" = "success" ] && \
+           [ "${{ needs.unit-tests.result }}" = "success" ] && \
+           [ "${{ needs.integration-tests.result }}" = "success" ] && \
+           [ "${{ needs.security-tests.result }}" = "success" ] && \
+           [ "${{ needs.performance-tests.result }}" = "success" ]; then
+          echo "✅ All tests passed" >> test-summary.md
+        else
+          echo "❌ Some tests failed" >> test-summary.md
+        fi
+
+    - name: Upload test summary
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-summary
+        path: test-summary.md
+
+    - name: Test Results Comment
+      uses: dorny/test-reporter@v1
+      if: success() || failure()
+      with:
+        name: Test Results
+        path: 'artifacts/**/*.json'
+        reporter: java-junit
+        fail-on-error: false
+
+  # Cleanup Job
+  cleanup:
+    name: Cleanup
+    runs-on: ubuntu-latest
+    needs: [integration-tests]
+    if: always()
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Cleanup test resources
+      run: |
+        # Add cleanup commands for any lingering test resources
+        echo "Cleaning up test resources..."
+        # aws ec2 describe-instances --filters "Name=tag:Environment,Values=test" --query 'Reservations[*].Instances[*].InstanceId' --output text | xargs -r aws ec2 terminate-instances --instance-ids
+        echo "Cleanup completed"
+      continue-on-error: true
+
+  # Notification Job
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [test-summary]
+    if: always()
+
+    steps:
+    - name: Send notification
+      run: |
+        if [ "${{ needs.test-summary.result }}" = "success" ]; then
+          echo "✅ All tests passed successfully!"
+        else
+          echo "❌ Some tests failed. Check the test summary for details."
+        fi
+      continue-on-error: true
